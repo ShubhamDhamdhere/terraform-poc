@@ -13,18 +13,12 @@ env:
   TF_VERSION: 1.6.0
 
 jobs:
-
-  # ──────────────────────────────────────────
-  # JOB 1: Validate + Plan (runs on every PR and push)
-  # ──────────────────────────────────────────
   terraform-plan:
     name: Validate & Plan
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       pull-requests: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,59 +35,14 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Fix HashiCorp GPG key
-        run: |
-          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-
       - name: Terraform Init
-        id: init
         run: terraform init
 
-      - name: Terraform Format check
-        id: fmt
-        run: terraform fmt -check -recursive
-        continue-on-error: true
-
       - name: Terraform Validate
-        id: validate
         run: terraform validate
 
       - name: Terraform Plan
-        id: plan
         run: terraform plan -no-color -out=tfplan
-        continue-on-error: false
-
-      # Post plan output as a comment on Pull Requests
-      - name: Post Plan to PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const output = `### Terraform Plan Result
-
-            | Step | Status |
-            |------|--------|
-            | Format | ${{ steps.fmt.outcome == 'success' && '✅ Passed' || '⚠️ Issues found' }} |
-            | Init   | ${{ steps.init.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
-            | Validate | ${{ steps.validate.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
-            | Plan   | ${{ steps.plan.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
-
-            <details><summary>Show full plan</summary>
-
-            \`\`\`hcl
-            ${{ steps.plan.outputs.stdout }}
-            \`\`\`
-
-            </details>
-
-            *Pushed by: @${{ github.actor }} | Workflow: \`${{ github.workflow }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            });
 
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
@@ -102,18 +51,13 @@ jobs:
           path: tfplan
           retention-days: 5
 
-  # ──────────────────────────────────────────
-  # JOB 2: Apply (runs ONLY on push to main)
-  # ──────────────────────────────────────────
   terraform-apply:
     name: Apply
     runs-on: ubuntu-latest
     needs: terraform-plan
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
     environment:
       name: production
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -129,10 +73,6 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Fix HashiCorp GPG key
-        run: |
-          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
 
       - name: Terraform Init
         run: terraform init
@@ -147,40 +87,3 @@ jobs:
 
       - name: Print Outputs
         run: terraform output
-
-  # ──────────────────────────────────────────
-  # JOB 3: Destroy (manual trigger only)
-  # ──────────────────────────────────────────
-  terraform-destroy:
-    name: Destroy (manual only)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-
-    environment:
-      name: production
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Fix HashiCorp GPG key
-        run: |
-          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Destroy
-        run: terraform destroy -auto-approve
